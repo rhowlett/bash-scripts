@@ -1,12 +1,146 @@
 #!/usr/bin/env bash
 
+####################################################################################################################
+#                                                                                                                  #
+# -#######     .#######-       .#.   .#######.   +#    +#               -#######      -#.   -#      #-    #######. #
+# +##---+#.    .##---+#+       .#-   .##---##.   ##    ##               +#+---##      -#.   +#.     #-    ##---+#- #
+# +#-   .#.    .#+    #+       .#-   .#-         ##    ##               +#.           -#.   +#.     #-    #-   .#- #
+# +##########+ .###########   ###-  ###-         ###########.          ###.          ###########  ###-  #########- #
+# +###    #### .###-   -###  .###- .###-         ###+    ###-         -###.         -###.   +###  ###- .###-       #
+# +###    #### .###-   -###  .###- .###-         ###+    ###-         -###.         -###.   +###  ###- .###-       #
+# +###    #### .###-   -###  .###- .###-   -###  ###+    ###-         -###.   +###  -###.   +###  ###- .###-       #
+# +########### .###-   -###  .###- .###########  ###+    ###-         -###########  -###.   +###  ###- .###-       #
+#                                                                                                                  #
+####################################################################################################################
+#                                                                                                                  #
+# ▒███████     ░███████▒       ░█░   ░███████░   ▓█    ▓█               ▒███████      ▒█░   ▒█      █▒    ███████░ #
+# ▓██▒▒▒▓█░    ░██▒▒▒▓█▓       ░█▒   ░██▒▒▒██░   ██    ██               ▓█▓▒▒▒██      ▒█░   ▓█░     █▒    ██▒▒▒▓█▒ #
+# ▓█▒   ░█░    ░█▓    █▓       ░█▒   ░█▒         ██    ██               ▓█░           ▒█░   ▓█░     █▒    █▒   ░█▒ #
+# ▓██████████▓ ░███████████   ███▒  ███▒         ███████████░          ███░          ███████████  ███▒  █████████▒ #
+# ▓███    ████ ░███▒   ▒███  ░███▒ ░███▒         ███▓    ███▒         ▒███░         ▒███░   ▓███  ███▒ ░███▒       #
+# ▓███    ████ ░███▒   ▒███  ░███▒ ░███▒         ███▓    ███▒         ▒███░         ▒███░   ▓███  ███▒ ░███▒       #
+# ▓███    ████ ░███▒   ▒███  ░███▒ ░███▒   ▒███  ███▓    ███▒         ▒███░   ▓███  ▒███░   ▓███  ███▒ ░███▒       #
+# ▓███████████ ░███▒   ▒███  ░███▒ ░███████████  ███▓    ███▒         ▒███████████  ▒███░   ▓███  ███▒ ░███▒       #
+#                                                                                                                  #
+####################################################################################################################
 # GNU GENERAL PUBLIC LICENSE
 # Version 3, 29 June 2007
 # Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>
 
-echo "----------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------"
-printf "        File %-80s | File %s\n" $1 $2
-echo "----------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------"
-sdiff -l -w 180 $1 $2 | cat -n | grep -v -e \($
-echo "----------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------"
-echo "End Diff"
+set -Eeuo pipefail
+
+usage() {
+  echo "Usage: $0 [-w WIDTH] [-s] [--color|--color=none] LEFT_FILE RIGHT_FILE"
+  echo "  -w WIDTH          Set sdiff output width (default: terminal width or 180)"
+  echo "  -s                Suppress common lines (sdiff -s)"
+  echo "  --color           Force colorized output"
+  echo "  --color=none      Disable colorized output (trumps earlier --color)"
+}
+
+# -------------------
+# Defaults
+# -------------------
+width="${COLUMNS:-$(tput cols 2>/dev/null || echo 180)}"
+sdiff_flags=()
+
+# Default color mode: auto (enabled if stdout is a TTY)
+color_mode="auto"  # values: auto|on|off
+
+# -------------------
+# Pre-parse long options to preserve order and let the last one win
+# -------------------
+rest=()
+for arg in "$@"; do
+  case "$arg" in
+    --color)        color_mode="on" ;;
+    --color=none)   color_mode="off" ;;
+    --)             rest+=("$arg"); shift; break ;;
+    --*)            # Unknown long option -> error
+                    echo "Error: unknown option '$arg'" >&2
+                    usage; exit 2 ;;
+    *)              rest+=("$arg") ;;
+  esac
+  shift || true
+done
+# Append any remaining positional args after --
+while (($#)); do rest+=("$1"); shift; done
+# Reset positional params for getopts & the rest of the script
+set -- "${rest[@]}"
+
+# -------------------
+# Short options via getopts
+# -------------------
+while getopts ":w:s" opt; do
+  case "$opt" in
+    w) width="$OPTARG" ;;
+    s) sdiff_flags+=("-s") ;;
+    *) usage; exit 2 ;;
+  case_esac
+done
+shift $((OPTIND-1))
+
+# -------------------
+# Args & file checks
+# -------------------
+if (( $# != 2 )); then usage; exit 2; fi
+left=$1; right=$2
+for f in "$left" "$right"; do
+  [[ -e "$f" ]] || { echo "Error: '$f' not found." >&2; exit 1; }
+done
+
+# -------------------
+# Color setup
+# -------------------
+supports_color() { [[ -t 1 ]]; }   # stdout is a TTY
+enable_color=false
+case "$color_mode" in
+  on)  enable_color=true ;;
+  off) enable_color=false ;;
+  auto) supports_color && enable_color=true || enable_color=false ;;
+esac
+
+if $enable_color; then
+  BOLD=$'\e[1m'; DIM=$'\e[2m'
+  RED=$'\e[31m'; GRN=$'\e[32m'; YEL=$'\e[33m'; BLU=$'\e[34m'
+  RST=$'\e[0m'
+else
+  BOLD=""; DIM=""; RED=""; GRN=""; YEL=""; BLU=""; RST=""
+fi
+
+# -------------------
+# Header bar (spans two columns with a + in the middle)
+# -------------------
+bar_left=$(printf '%*s' "$width" '' | tr ' ' '-')
+bar_right=$bar_left
+bar="${DIM}${bar_left}+${bar_right}${RST}"
+
+printf '%s\n' "$bar"
+printf "${BOLD}        File %-*s | File %s${RST}\n" $((width-12)) "$(basename -- "$left")" "$(basename -- "$right")"
+printf '%s\n' "$bar"
+
+# -------------------
+# Run sdiff, number with nl, filter wrapped lines, then colorize markers
+#   - Markers we color based on the LAST non-space char (sdiff -l puts it at the end):
+#       '<'  only in LEFT  -> green
+#       '>'  only in RIGHT -> red
+#       '|'  different     -> yellow
+# -------------------
+sdiff -l -w "$width" "${sdiff_flags[@]}" -- "$left" "$right" \
+  | nl -ba -w6 -s'  ' \
+  | grep -v -- '($' \
+  | awk -v use_color="$enable_color" \
+        -v RED="$RED" -v GRN="$GRN" -v YEL="$YEL" -v RST="$RST" '
+      {
+        if (!use_color) { print; next }
+        # Find last non-space character
+        s=$0
+        gsub(/[[:space:]]+$/, "", s)
+        last = substr(s, length(s), 1)
+        if (last=="<")      { printf("%s%s%s\n", GRN, $0, RST) }
+        else if (last==">") { printf("%s%s%s\n", RED, $0, RST) }
+        else if (last=="|") { printf("%s%s%s\n", YEL, $0, RST) }
+        else                { print }
+      }'
+
+printf '%s\n' "$bar"
+echo "${BOLD}End Diff${RST}"
